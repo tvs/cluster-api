@@ -684,7 +684,7 @@ func IsSupportedVersionSkew(a, b semver.Version) bool {
 	return b.Minor-a.Minor <= 1
 }
 
-// NewDelegatingClientFunc returns a manager.NewClientFunc to be used when creating
+// ManagerDelegatingClientFunc returns a manager.NewClientFunc to be used when creating
 // a new controller runtime manager.
 //
 // A delegating client reads from the cache and writes directly to the server.
@@ -701,6 +701,12 @@ func ManagerDelegatingClientFunc(cache cache.Cache, config *rest.Config, options
 		Writer:       c,
 		StatusClient: c,
 	}, nil
+}
+
+// ManagerCachelessClientFunc returns a manager.NewClientFunc to be used when creating
+// a new controller runtime manager.
+func ManagerCachelessClientFunc(cache cache.Cache, config *rest.Config, options client.Options) (client.Client, error) {
+	return client.New(config, options)
 }
 
 // LowestNonZeroResult compares two reconciliation results

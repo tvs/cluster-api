@@ -164,7 +164,7 @@ func main() {
 		RetryPeriod:            &leaderElectionRetryPeriod,
 		Namespace:              watchNamespace,
 		SyncPeriod:             &syncPeriod,
-		NewClient:              util.ManagerDelegatingClientFunc,
+		NewClient:              util.ManagerCachelessClientFunc,
 		Port:                   webhookPort,
 		HealthProbeBindAddress: healthAddr,
 	})
