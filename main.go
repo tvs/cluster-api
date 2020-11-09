@@ -24,9 +24,11 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog"
 	"k8s.io/klog/klogr"
 	clusterv1alpha2 "sigs.k8s.io/cluster-api/api/v1alpha2"
@@ -41,6 +43,8 @@ import (
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	// +kubebuilder:scaffold:imports
@@ -155,16 +159,31 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "controller-leader-election-capi",
-		LeaseDuration:          &leaderElectionLeaseDuration,
-		RenewDeadline:          &leaderElectionRenewDeadline,
-		RetryPeriod:            &leaderElectionRetryPeriod,
-		Namespace:              watchNamespace,
-		SyncPeriod:             &syncPeriod,
-		NewClient:              util.ManagerCachelessClientFunc,
+		Scheme:             scheme,
+		MetricsBindAddress: metricsAddr,
+		LeaderElection:     enableLeaderElection,
+		LeaderElectionID:   "controller-leader-election-capi",
+		LeaseDuration:      &leaderElectionLeaseDuration,
+		RenewDeadline:      &leaderElectionRenewDeadline,
+		RetryPeriod:        &leaderElectionRetryPeriod,
+		Namespace:          watchNamespace,
+		SyncPeriod:         &syncPeriod,
+		NewClient: func(cache cache.Cache, config *rest.Config, options client.Options) (client.Client, error) {
+			c, err := client.New(config, options)
+			if err != nil {
+				return nil, err
+			}
+
+			return util.NewSelectiveDelegatingClient(util.NewSelectiveDelegatingClientInput{
+				CacheReader: cache,
+				Client:      c,
+				Scheme:      options.Scheme,
+				UncachedObjects: []runtime.Object{
+					&corev1.Secret{},
+					&corev1.ConfigMap{},
+				},
+			})
+		},
 		Port:                   webhookPort,
 		HealthProbeBindAddress: healthAddr,
 	})

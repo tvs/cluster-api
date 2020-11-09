@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -137,8 +138,23 @@ func main() {
 		RetryPeriod:        &leaderElectionRetryPeriod,
 		Namespace:          watchNamespace,
 		SyncPeriod:         &syncPeriod,
-		NewClient:          util.ManagerCachelessClientFunc,
-		Port:               webhookPort,
+		NewClient: func(cache cache.Cache, config *rest.Config, options client.Options) (client.Client, error) {
+			c, err := client.New(config, options)
+			if err != nil {
+				return nil, err
+			}
+
+			return util.NewSelectiveDelegatingClient(util.NewSelectiveDelegatingClientInput{
+				CacheReader: cache,
+				Client:      c,
+				Scheme:      options.Scheme,
+				UncachedObjects: []runtime.Object{
+					&corev1.Secret{},
+					&corev1.ConfigMap{},
+				},
+			})
+		},
+		Port: webhookPort,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

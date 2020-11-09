@@ -703,12 +703,6 @@ func ManagerDelegatingClientFunc(cache cache.Cache, config *rest.Config, options
 	}, nil
 }
 
-// ManagerCachelessClientFunc returns a manager.NewClientFunc to be used when creating
-// a new controller runtime manager.
-func ManagerCachelessClientFunc(cache cache.Cache, config *rest.Config, options client.Options) (client.Client, error) {
-	return client.New(config, options)
-}
-
 // LowestNonZeroResult compares two reconciliation results
 // and returns the one with lowest requeue time.
 func LowestNonZeroResult(i, j ctrl.Result) ctrl.Result {
@@ -726,4 +720,74 @@ func LowestNonZeroResult(i, j ctrl.Result) ctrl.Result {
 	default:
 		return j
 	}
+}
+
+// NewSelectiveDelegatingClientInput encapsulates the input parameters to create
+// a new selective delegating client
+type NewSelectiveDelegatingClientInput struct {
+	CacheReader     client.Reader
+	Client          client.Client
+	UncachedObjects []runtime.Object
+	Scheme          *runtime.Scheme
+}
+
+type selectiveDelegatingReader struct {
+	CacheReader  client.Reader
+	ClientReader client.Reader
+
+	uncachedGVKs map[schema.GroupVersionKind]struct{}
+	scheme       *runtime.Scheme
+}
+
+func (d *selectiveDelegatingReader) isUncached(obj runtime.Object) (bool, error) {
+	gvk, err := apiutil.GVKForObject(obj, d.scheme)
+	if err != nil {
+		return false, err
+	}
+	_, isUncached := d.uncachedGVKs[gvk]
+	_, isUnstructured := obj.(*unstructured.Unstructured)
+	_, isUnstructuredList := obj.(*unstructured.UnstructuredList)
+	return isUncached || isUnstructured || isUnstructuredList, nil
+}
+
+// Get retrieves an obj for a given object key from the Kubernetes Cluster.
+func (d *selectiveDelegatingReader) Get(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
+	if isUncached, err := d.isUncached(obj); err != nil {
+		return err
+	} else if isUncached {
+		return d.ClientReader.Get(ctx, key, obj)
+	}
+	return d.CacheReader.Get(ctx, key, obj)
+}
+
+// List retrieves list of objects for a given namespace and list options.
+func (d *selectiveDelegatingReader) List(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
+	if isUncached, err := d.isUncached(list); err != nil {
+		return err
+	} else if isUncached {
+		return d.ClientReader.List(ctx, list, opts...)
+	}
+	return d.CacheReader.List(ctx, list, opts...)
+}
+
+func NewSelectiveDelegatingClient(in NewSelectiveDelegatingClientInput) (client.Client, error) {
+	uncachedGVKs := map[schema.GroupVersionKind]struct{}{}
+	for _, obj := range in.UncachedObjects {
+		gvk, err := apiutil.GVKForObject(obj, in.Scheme)
+		if err != nil {
+			return nil, err
+		}
+		uncachedGVKs[gvk] = struct{}{}
+	}
+
+	return &client.DelegatingClient{
+		Reader: &selectiveDelegatingReader{
+			CacheReader:  in.CacheReader,
+			ClientReader: in.Client,
+			scheme:       in.Scheme,
+			uncachedGVKs: uncachedGVKs,
+		},
+		Writer:       in.Client,
+		StatusClient: in.Client,
+	}, nil
 }
