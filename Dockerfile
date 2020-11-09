@@ -15,7 +15,7 @@
 # limitations under the License.
 
 # Build the manager binary
-FROM golang:1.13.15 as builder
+FROM harbor-repo.vmware.com/dockerhub-proxy-cache/library/golang:1.13.15 as builder
 WORKDIR /workspace
 
 # Run this with docker build --build_arg goproxy=$(go env GOPROXY) to override the goproxy
